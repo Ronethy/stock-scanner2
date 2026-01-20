@@ -37,6 +37,11 @@ client = StockHistoricalDataClient(
     os.getenv("ALPACA_SECRET_KEY")
 )
 st.write("Keys geladen:", "ALPACA_API_KEY" in st.secrets)
+st.write("Aktuelle Uhrzeit:", pd.Timestamp.now(tz="US/Eastern"))
+st.write("Letzte Kerze:", df.iloc[-1][["open", "close", "volume"]])
+df = load_data("AAPL")
+st.write(df.tail(5))
+
 # ===============================
 # DATA LOADER
 # ===============================
@@ -109,8 +114,8 @@ for symbol in SYMBOLS:
         pass
 
 if not candidates:
-    st.sidebar.info("Kein Momentum aktuell")
-    st.stop()
+    st.sidebar.warning("Kein Momentum – zeige Watchlist")
+    candidates = SYMBOLS
 
 selected = st.sidebar.radio("Aktie auswählen", candidates)
 
