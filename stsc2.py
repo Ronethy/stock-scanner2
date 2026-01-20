@@ -36,7 +36,7 @@ client = StockHistoricalDataClient(
     os.getenv("ALPACA_API_KEY"),
     os.getenv("ALPACA_SECRET_KEY")
 )
-
+st.write("Keys geladen:", "ALPACA_API_KEY" in st.secrets)
 # ===============================
 # DATA LOADER
 # ===============================
