@@ -64,10 +64,12 @@ def load_market_data(symbols):
     start = now_ny - timedelta(minutes=LOOKBACK_MINUTES)
 
     request = StockBarsRequest(
-        symbol_or_symbols=symbols,
-        timeframe=TIMEFRAME,
-        start=start,
-        end=now_ny
+    symbol_or_symbols=symbols,
+    timeframe=TIMEFRAME,
+    start=start,
+    end=now_ny,
+    feed="iex"   # <<< DAS IST ENTSCHEIDEND
+
     )
 
     bars = client.get_stock_bars(request).df
