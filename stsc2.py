@@ -82,14 +82,18 @@ def analyze(df):
 # ===============================
 # MARKET SCAN
 # ===============================
-st.sidebar.header("🔥 Momentum Scanner")
-
-candidates = []
 market_data = {}
+candidates = []
 
 for symbol in SYMBOLS:
     try:
         df = load_data(symbol)
+
+        if df.empty:
+            continue
+
+        market_data[symbol] = df  # IMMER speichern
+
         if len(df) < 30:
             continue
 
@@ -103,20 +107,16 @@ for symbol in SYMBOLS:
         if change_5m > MIN_CHANGE_5M and vol_spike:
             candidates.append(symbol)
 
-        market_data[symbol] = df
-
     except Exception:
         pass
-
-if not candidates:
-    st.sidebar.warning("Kein Momentum – zeige Watchlist")
-    candidates = SYMBOLS
-
-selected = st.sidebar.radio("Aktie auswählen", candidates)
 
 # ===============================
 # DETAIL VIEW
 # ===============================
+if selected not in market_data:
+    st.error(f"Keine Daten für {selected}")
+    st.stop()
+
 df = market_data[selected]
 score, action = analyze(df)
 
