@@ -36,11 +36,6 @@ client = StockHistoricalDataClient(
     os.getenv("ALPACA_API_KEY"),
     os.getenv("ALPACA_SECRET_KEY")
 )
-st.write("Keys geladen:", "ALPACA_API_KEY" in st.secrets)
-st.write("Aktuelle Uhrzeit:", pd.Timestamp.now(tz="US/Eastern"))
-st.write("Letzte Kerze:", df.iloc[-1][["open", "close", "volume"]])
-df = load_data("AAPL")
-st.write(df.tail(5))
 
 # ===============================
 # DATA LOADER
@@ -173,3 +168,9 @@ with col2:
     st.divider()
     st.write("**Indikatoren**")
     st.write(f"RSI: {round(df.rsi.iloc[-1], 1)}")
+
+st.write("Keys geladen:", "ALPACA_API_KEY" in st.secrets)
+st.write("Aktuelle Uhrzeit:", pd.Timestamp.now(tz="US/Eastern"))
+st.write("Letzte Kerze:", df.iloc[-1][["open", "close", "volume"]])
+df = load_data("AAPL")
+st.write(df.tail(5))
