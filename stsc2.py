@@ -113,57 +113,22 @@ for symbol in SYMBOLS:
 # ===============================
 # DETAIL VIEW
 # ===============================
+
+st.subheader("📈 Detailansicht")
+
+selected = st.selectbox(
+    "Aktie auswählen",
+    candidates if candidates else SYMBOLS
+)
+
 if selected not in market_data:
     st.error(f"Keine Daten für {selected}")
     st.stop()
 
 df = market_data[selected]
-score, action = analyze(df)
 
-col1, col2 = st.columns([4, 1])
+st.write("Letzte Kerze:", df.iloc[-1][["open", "close", "volume"]])
 
-with col1:
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df.open,
-        high=df.high,
-        low=df.low,
-        close=df.close,
-        name="Price"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df["ema9"],
-        line=dict(width=1),
-        name="EMA 9"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df["ema20"],
-        line=dict(width=1),
-        name="EMA 20"
-    ))
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df["vwap"],
-        line=dict(width=1),
-        name="VWAP"
-    ))
-
-    fig.update_layout(height=550)
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.subheader(f"🧠 {selected}")
-    st.metric("Score", round(score, 2))
-
-    if "CALL" in action:
-        st.success(action)
-    elif "PUT" in action:
-        st.error(action)
-    else:
-        st.warning(action)
 
     st.divider()
     st.write("**Indikatoren**")
