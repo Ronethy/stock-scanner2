@@ -52,19 +52,21 @@ else:
 st.divider()
 
 # =====================================================
-# TABS
+# TABS (ALLE!)
 # =====================================================
-tab_early, tab_sp500 = st.tabs([
+tab_early, tab_sp500, tab_day, tab_swing = st.tabs([
     "🔥 Early Movers",
-    "🧠 S&P 500 Scanner"
+    "🧠 S&P 500 Scanner",
+    "⚡ Daytrade",
+    "🧭 Swing"
 ])
 
 # =====================================================
-# 🔥 EARLY MOVERS TAB
+# 🔥 EARLY MOVERS
 # =====================================================
 with tab_early:
     st.subheader("🔥 Early Movers")
-    st.caption("Basierend auf Daily Open vs. Vortages-Close (Free Alpaca)")
+    st.caption("Daily Open vs. Vortages-Close (Free Alpaca)")
 
     early_df = scan_early_movers(
         symbols=SP500_SYMBOLS,
@@ -75,15 +77,12 @@ with tab_early:
     if early_df.empty:
         st.info("Keine Early Movers gefunden – Markt ruhig")
     else:
-        gap_up = early_df[early_df["Gap %"] > 0]
-        gap_down = early_df[early_df["Gap %"] < 0]
-
         col1, col2 = st.columns(2)
 
         with col1:
             st.markdown("### 📈 Gap Up")
             st.dataframe(
-                gap_up.drop(columns=["Abs Gap"]),
+                early_df[early_df["Gap %"] > 0].drop(columns=["Abs Gap"]),
                 use_container_width=True,
                 hide_index=True
             )
@@ -91,13 +90,13 @@ with tab_early:
         with col2:
             st.markdown("### 📉 Gap Down")
             st.dataframe(
-                gap_down.drop(columns=["Abs Gap"]),
+                early_df[early_df["Gap %"] < 0].drop(columns=["Abs Gap"]),
                 use_container_width=True,
                 hide_index=True
             )
 
 # =====================================================
-# 🧠 S&P 500 SCANNER TAB
+# 🧠 S&P 500 SCANNER (DAILY)
 # =====================================================
 with tab_sp500:
     st.subheader("🧠 S&P 500 Trend Scanner (Daily)")
@@ -113,24 +112,21 @@ with tab_sp500:
                 limit=60
             )
             df = client.get_stock_bars(req).df
-
             if df is None or df.empty:
                 continue
 
-            # Indicators
             df["ema9"] = ema(df["close"], 9)
             df["ema20"] = ema(df["close"], 20)
             df["ema50"] = ema(df["close"], 50)
             df["rsi"] = rsi(df["close"])
             df["atr"] = atr(df)
             df.dropna(inplace=True)
-
             if df.empty:
                 continue
 
             last = df.iloc[-1]
 
-            snapshot = MarketSnapshot(
+            snap = MarketSnapshot(
                 symbol=symbol,
                 price=float(last["close"]),
                 rsi=float(last["rsi"]),
@@ -142,9 +138,9 @@ with tab_sp500:
                 market_state=market_state
             )
 
-            score = calculate_trend_score(snapshot)
-            bias = option_bias(snapshot, score)
-            plan = trade_plan(snapshot, score)
+            score = calculate_trend_score(snap)
+            bias = option_bias(snap, score)
+            plan = trade_plan(snap, score)
 
             results.append({
                 "Symbol": symbol,
@@ -156,26 +152,131 @@ with tab_sp500:
             })
 
         except Exception:
-            # einzelne Symbole dürfen den Scanner nie crashen
             continue
 
-    # ===============================
-    # SAFE OUTPUT
-    # ===============================
     if not results:
         st.info("Keine verwertbaren S&P 500 Daten verfügbar")
     else:
         res = pd.DataFrame(results)
+        res = res.sort_values("Score", ascending=False).head(20)
+        st.dataframe(res, use_container_width=True, hide_index=True)
 
-        if "Score" not in res.columns:
-            st.warning("Scanner konnte keinen Trend-Score berechnen")
+# =====================================================
+# ⚡ DAYTRADE (DETAIL)
+# =====================================================
+with tab_day:
+    st.subheader("⚡ Daytrade – Detailanalyse")
+
+    symbol = st.selectbox(
+        "Aktie auswählen",
+        SP500_SYMBOLS,
+        key="daytrade_symbol"
+    )
+
+    try:
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame.Minute,
+            limit=120
+        )
+        df = client.get_stock_bars(req).df
+
+        if df is None or df.empty:
+            st.warning("Keine Intraday-Daten verfügbar")
         else:
-            res = (
-                res.sort_values("Score", ascending=False)
-                   .head(20)
+            df["ema9"] = ema(df["close"], 9)
+            df["ema20"] = ema(df["close"], 20)
+            df["ema50"] = ema(df["close"], 50)
+            df["rsi"] = rsi(df["close"])
+            df["atr"] = atr(df)
+            df.dropna(inplace=True)
+
+            last = df.iloc[-1]
+
+            snap = MarketSnapshot(
+                symbol=symbol,
+                price=float(last["close"]),
+                rsi=float(last["rsi"]),
+                ema9=float(last["ema9"]),
+                ema20=float(last["ema20"]),
+                ema50=float(last["ema50"]),
+                atr=float(last["atr"]),
+                volume_ratio=float(last["volume"] / df["volume"].mean()),
+                market_state=market_state
             )
-            st.dataframe(
-                res,
-                use_container_width=True,
-                hide_index=True
+
+            score = calculate_trend_score(snap)
+            bias = option_bias(snap, score)
+            plan = trade_plan(snap, score)
+
+            st.metric("Trend-Score", score)
+            st.metric("Option-Bias", bias)
+
+            if plan:
+                st.markdown("### 📦 Trade-Plan")
+                st.json(plan)
+            else:
+                st.info("Kein valider Trade-Plan (konservativ gefiltert)")
+
+    except Exception:
+        st.error("Fehler beim Laden der Intraday-Daten")
+
+# =====================================================
+# 🧭 SWING (DETAIL)
+# =====================================================
+with tab_swing:
+    st.subheader("🧭 Swing – Mehrtägige Analyse")
+
+    symbol = st.selectbox(
+        "Aktie auswählen",
+        SP500_SYMBOLS,
+        key="swing_symbol"
+    )
+
+    try:
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame.Day,
+            limit=120
+        )
+        df = client.get_stock_bars(req).df
+
+        if df is None or df.empty:
+            st.warning("Keine Daily-Daten verfügbar")
+        else:
+            df["ema9"] = ema(df["close"], 9)
+            df["ema20"] = ema(df["close"], 20)
+            df["ema50"] = ema(df["close"], 50)
+            df["rsi"] = rsi(df["close"])
+            df["atr"] = atr(df)
+            df.dropna(inplace=True)
+
+            last = df.iloc[-1]
+
+            snap = MarketSnapshot(
+                symbol=symbol,
+                price=float(last["close"]),
+                rsi=float(last["rsi"]),
+                ema9=float(last["ema9"]),
+                ema20=float(last["ema20"]),
+                ema50=float(last["ema50"]),
+                atr=float(last["atr"]),
+                volume_ratio=float(last["volume"] / df["volume"].mean()),
+                market_state=market_state
             )
+
+            score = calculate_trend_score(snap)
+            bias = option_bias(snap, score)
+            plan = trade_plan(snap, score)
+
+            st.metric("Trend-Score", score)
+            st.metric("Option-Bias", bias)
+
+            if plan:
+                st.markdown("### 📦 Swing-Trade-Plan")
+                st.json(plan)
+            else:
+                st.info("Kein valider Swing-Trade (konservativ)")
+
+    except Exception:
+        st.error("Fehler beim Laden der Swing-Daten")
