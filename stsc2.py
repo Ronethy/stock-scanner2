@@ -4,7 +4,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import pytz
 
 from alpaca.data.historical import StockHistoricalDataClient
@@ -15,24 +15,14 @@ from alpaca.data.timeframe import TimeFrame
 # ===============================
 # CONFIG
 # ===============================
-st.set_page_config(
-    page_title="Smart Momentum Trading Dashboard",
-    layout="wide"
-)
+st.set_page_config("Smart Momentum Trading Dashboard", layout="wide")
 
-SYMBOLS = [
-    "AAPL", "NVDA", "AMD", "TSLA", "META",
-    "MSFT", "AMZN", "COIN", "PLTR", "NFLX"
-]
-
+SYMBOLS = ["AAPL","NVDA","AMD","TSLA","META","MSFT","AMZN","COIN","PLTR","NFLX"]
 TIMEFRAME = TimeFrame.Minute
 LOOKBACK_MINUTES = 60
-VOLUME_SPIKE_FACTOR = 1.5
-PRICE_CHANGE_THRESHOLD = 0.3  # %
-
 
 # ===============================
-# AUTH / CLIENT
+# AUTH
 # ===============================
 API_KEY = st.secrets.get("ALPACA_API_KEY")
 SECRET_KEY = st.secrets.get("ALPACA_SECRET_KEY")
@@ -41,133 +31,111 @@ st.title("📊 Smart Momentum Trading Dashboard")
 st.write("Keys geladen:", bool(API_KEY and SECRET_KEY))
 
 if not API_KEY or not SECRET_KEY:
-    st.error("❌ Alpaca API Keys fehlen")
     st.stop()
 
 client = StockHistoricalDataClient(API_KEY, SECRET_KEY)
 
+# ===============================
+# TIME
+# ===============================
+ny = pytz.timezone("America/New_York")
+now = datetime.now(ny)
+market_open = time(9, 30)
+market_close = time(16, 0)
+
+is_premarket = now.time() < market_open
+is_market_open = market_open <= now.time() <= market_close
+
+st.caption(f"Aktuelle Uhrzeit (NYSE): {now}")
+st.caption(f"Marktstatus: {'🟡 Pre-Market' if is_premarket else '🟢 Market Open' if is_market_open else '🔴 Closed'}")
 
 # ===============================
-# TIME INFO
+# DATA LOADER
 # ===============================
-ny_tz = pytz.timezone("America/New_York")
-now_ny = datetime.now(ny_tz)
-st.caption(f"Aktuelle Uhrzeit (NYSE): {now_ny}")
-
-
-# ===============================
-# DATA FETCH
-# ===============================
-@st.cache_data(ttl=30)
-def load_market_data(symbols):
-    data = {}
-    start = now_ny - timedelta(minutes=LOOKBACK_MINUTES)
-
-    request = StockBarsRequest(
-    symbol_or_symbols=symbols,
-    timeframe=TIMEFRAME,
-    start=start,
-    end=now_ny,
-    feed="iex"   # <<< DAS IST ENTSCHEIDEND
-
+@st.cache_data(ttl=60)
+def load_data(symbols):
+    start = now - timedelta(minutes=LOOKBACK_MINUTES)
+    req = StockBarsRequest(
+        symbol_or_symbols=symbols,
+        timeframe=TIMEFRAME,
+        start=start,
+        end=now,
+        feed="iex"
     )
-
-    bars = client.get_stock_bars(request).df
+    bars = client.get_stock_bars(req).df
+    data = {}
 
     if bars.empty:
         return data
 
-    for symbol in symbols:
+    for s in symbols:
         try:
-            df = bars.loc[symbol].copy()
+            df = bars.loc[s].copy()
             df["return"] = df["close"].pct_change() * 100
-            df["vol_avg"] = df["volume"].rolling(20).mean()
-            data[symbol] = df.dropna()
-        except Exception:
+            data[s] = df.dropna()
+        except:
             continue
-
     return data
 
 
-market_data = load_market_data(SYMBOLS)
-
+market_data = load_data(SYMBOLS)
 
 # ===============================
-# MOMENTUM SCANNER
+# PRE-MARKET SCANNER
 # ===============================
-st.subheader("🔥 Momentum Scanner")
+st.subheader("🔥 Scanner")
 
 candidates = []
 
-for symbol, df in market_data.items():
-    if df.empty:
-        continue
-
-    last = df.iloc[-1]
-
-    price_move = last["return"]
-    volume_spike = last["volume"] > last["vol_avg"] * VOLUME_SPIKE_FACTOR
-
-    if abs(price_move) >= PRICE_CHANGE_THRESHOLD and volume_spike:
-        candidates.append(symbol)
-
-if candidates:
-    st.success(f"Momentum erkannt: {', '.join(candidates)}")
+if is_premarket:
+    st.info("Pre-Market Scanner aktiv")
+    for s, df in market_data.items():
+        if not df.empty and abs(df.iloc[-1]["return"]) > 0.5:
+            candidates.append(s)
 else:
-    st.info("Kein Momentum – zeige Watchlist")
+    for s, df in market_data.items():
+        if not df.empty and abs(df.iloc[-1]["return"]) > 0.3:
+            candidates.append(s)
 
+st.write("Watchlist:", candidates if candidates else SYMBOLS)
 
 # ===============================
 # DETAIL VIEW
 # ===============================
 st.subheader("📈 Detailansicht")
 
-selected = st.selectbox(
-    "Aktie auswählen",
-    candidates if candidates else SYMBOLS
-)
+selected = st.selectbox("Aktie auswählen", candidates if candidates else SYMBOLS)
 
-if selected not in market_data:
-    st.error(f"Keine Daten für {selected}")
+if selected not in market_data or market_data[selected].empty:
+    st.warning("Keine Intraday-Daten verfügbar (Pre-Market normal)")
     st.stop()
 
 df = market_data[selected]
-
-if df.empty:
-    st.warning("Keine Kerzendaten verfügbar")
-    st.stop()
-
 last = df.iloc[-1]
 
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Letzter Preis", f"${last['close']:.2f}")
-col2.metric("Return (1m)", f"{last['return']:.2f}%")
-col3.metric("Volumen", f"{int(last['volume']):,}")
-
-st.write("Letzte Kerze")
-st.dataframe(
-    df.tail(10)[["open", "high", "low", "close", "volume"]],
-    use_container_width=True
-)
-
+# ===============================
+# METRICS
+# ===============================
+c1, c2, c3 = st.columns(3)
+c1.metric("Preis", f"${last['close']:.2f}")
+c2.metric("Return", f"{last['return']:.2f}%")
+c3.metric("Volumen", int(last["volume"]))
 
 # ===============================
-# SIGNAL LOGIC (SIMPLE)
+# CANDLESTICK CHART
 # ===============================
-st.subheader("🧠 Trading-Einschätzung")
+st.subheader("📊 Candlestick Chart")
 
-signal = "NEUTRAL"
-
-if last["return"] > PRICE_CHANGE_THRESHOLD:
-    signal = "📈 LONG / CALL möglich"
-elif last["return"] < -PRICE_CHANGE_THRESHOLD:
-    signal = "📉 SHORT / PUT möglich"
-
-st.markdown(f"### Signal: **{signal}**")
-
+st.line_chart(df[["open","high","low","close"]])
 
 # ===============================
-# FOOTER
+# SIGNAL
 # ===============================
-st.caption("⚠️ Keine Anlageberatung | Daten via Alpaca Markets")
+st.subheader("🧠 Einschätzung")
+
+if last["return"] > 0.3:
+    st.success("📈 LONG / CALL Setup")
+elif last["return"] < -0.3:
+    st.error("📉 SHORT / PUT Setup")
+else:
+    st.info("⚪ Neutral")
