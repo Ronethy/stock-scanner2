@@ -88,5 +88,13 @@ with tab2:
         except Exception:
             pass
 
-    res = pd.DataFrame(results).sort_values("Score", ascending=False).head(20)
-    st.dataframe(res, use_container_width=True)
+    if not results:
+    st.info("Keine verwertbaren S&P 500 Daten verfügbar")
+else:
+    res = pd.DataFrame(results)
+
+    if "Score" not in res.columns:
+        st.warning("Scanner konnte keinen Trend-Score berechnen")
+    else:
+        res = res.sort_values("Score", ascending=False).head(20)
+        st.dataframe(res, use_container_width=True)
