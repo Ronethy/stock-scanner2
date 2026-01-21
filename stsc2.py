@@ -32,9 +32,14 @@ tab1, tab2 = st.tabs(["🔥 Early Movers", "🧠 S&P 500 Scanner"])
 
 # -------- EARLY MOVERS --------
 with tab1:
-    df = scan_early_movers(SP500_SYMBOLS, client)
-    st.dataframe(df, use_container_width=True)
+    st.subheader("🔥 Early Movers")
 
+    df = scan_early_movers(SP500_SYMBOLS, client)
+
+    if df.empty:
+        st.info("Keine Early Movers gefunden – Markt ruhig")
+    else:
+        st.dataframe(df, use_container_width=True)
 # -------- S&P 500 SCANNER --------
 with tab2:
     results = []
