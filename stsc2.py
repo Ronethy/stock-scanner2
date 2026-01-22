@@ -1,5 +1,5 @@
 # ================================
-# app.py – Smart Momentum Scanner
+# app.py – Smart Momentum Dashboard (STABIL)
 # ================================
 
 import streamlit as st
@@ -18,7 +18,7 @@ from logic.snapshot import MarketSnapshot
 from logic.data_loader import load_daily_data
 
 # ================================
-# CONFIG
+# PAGE CONFIG
 # ================================
 
 st.set_page_config(
@@ -38,21 +38,20 @@ market_close = ny_time.replace(hour=16, minute=0, second=0)
 
 if market_open <= ny_time <= market_close:
     market_state = "OPEN"
-    market_color = "🟢"
+    market_icon = "🟢"
 else:
     market_state = "CLOSED"
-    market_color = "🔴"
+    market_icon = "🔴"
 
 # ================================
 # HEADER
 # ================================
 
 st.title("📊 Smart Momentum Trading Dashboard")
-
 st.markdown(
     f"""
 **NYSE Zeit:** `{ny_time.strftime('%Y-%m-%d %H:%M:%S')}`  
-**Marktstatus:** {market_color} **{market_state}**
+**Marktstatus:** {market_icon} **{market_state}**
 """
 )
 
@@ -71,8 +70,8 @@ tab_market, tab_early, tab_sp500, tab_swing = st.tabs(
 with tab_market:
     st.subheader("📊 Marktüberblick")
     st.info(
-        "Dieses Dashboard kombiniert Trend-Momentum, EMA-Struktur, RSI "
-        "und Volatilität zu objektiven Trading-Signalen."
+        "Objektives Momentum- & Trend-Dashboard "
+        "(EMA-Struktur, RSI, Volatilität, Trend-Score)"
     )
 
 # ======================================================
@@ -84,13 +83,13 @@ with tab_early:
 
     movers = scan_early_movers()
 
-    if not movers:
-        st.warning("Keine auffälligen Premarket-Bewegungen gefunden")
+    if not movers or len(movers) == 0:
+        st.warning("Keine auffälligen Premarket-Gaps gefunden")
     else:
         st.dataframe(pd.DataFrame(movers), width="stretch")
 
 # ======================================================
-# 🧠 S&P 500 SCANNER
+# 🧠 S&P 500 SCANNER (DAYTRADING)
 # ======================================================
 
 with tab_sp500:
@@ -100,8 +99,8 @@ with tab_sp500:
 
     df = load_daily_data(symbol)
 
-    if df is None or len(df) < 60:
-        st.error("Nicht genügend Marktdaten verfügbar")
+    if df is None or df.empty or len(df) < 60:
+        st.warning("Nicht genügend Daten verfügbar")
         st.stop()
 
     df["ema9"] = ema(df["close"], 9)
@@ -109,23 +108,25 @@ with tab_sp500:
     df["ema50"] = ema(df["close"], 50)
     df["rsi"] = rsi(df["close"])
     df["atr"] = atr(df)
+
     df.dropna(inplace=True)
 
-    if df.empty:
+    if df.empty or len(df) < 5:
+        st.warning("Indikator-Daten unvollständig")
         st.stop()
 
     last = df.iloc[-1]
 
     snap = MarketSnapshot(
-        symbol,
-        last["close"],
-        last["rsi"],
-        last["ema9"],
-        last["ema20"],
-        last["ema50"],
-        last["atr"],
-        1.0,
-        market_state
+        symbol=symbol,
+        price=float(last["close"]),
+        rsi=float(last["rsi"]),
+        ema_fast=float(last["ema9"]),
+        ema_mid=float(last["ema20"]),
+        ema_slow=float(last["ema50"]),
+        atr=float(last["atr"]),
+        volume_factor=1.0,
+        market_state=market_state
     )
 
     score = calculate_trend_score(snap)
@@ -145,19 +146,21 @@ with tab_sp500:
         open=df["open"],
         high=df["high"],
         low=df["low"],
-        close=df["close"]
+        close=df["close"],
+        name="Price"
     )
     fig.add_trace(go.Scatter(x=df.index, y=df["ema20"], name="EMA 20"))
     fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], name="EMA 50"))
-    fig.update_layout(height=500, title=f"{symbol} – Daily Chart")
+    fig.update_layout(height=520, title=f"{symbol} – Daily Chart")
+
     st.plotly_chart(fig, width="stretch")
 
 # ======================================================
-# 📈 SWING TRADING (JETZT VOLLSTÄNDIG)
+# 📈 SWING TRADING (JETZT STABIL)
 # ======================================================
 
 with tab_swing:
-    st.subheader("📈 Swing Trading Analyse (Daily / Multi-Day)")
+    st.subheader("📈 Swing Trading (Multi-Day)")
 
     swing_symbol = st.selectbox(
         "📌 Swing-Symbol auswählen",
@@ -167,8 +170,8 @@ with tab_swing:
 
     df = load_daily_data(swing_symbol)
 
-    if df is None or len(df) < 120:
-        st.warning("Zu wenig Daten für Swing-Analyse")
+    if df is None or df.empty or len(df) < 120:
+        st.warning("Zu wenig Historie für Swing-Trading")
         st.stop()
 
     df["ema20"] = ema(df["close"], 20)
@@ -176,23 +179,25 @@ with tab_swing:
     df["ema200"] = ema(df["close"], 200)
     df["rsi"] = rsi(df["close"])
     df["atr"] = atr(df)
+
     df.dropna(inplace=True)
 
-    if df.empty:
+    if df.empty or len(df) < 10:
+        st.warning("Swing-Indikatoren nicht vollständig")
         st.stop()
 
     last = df.iloc[-1]
 
     snap = MarketSnapshot(
-        swing_symbol,
-        last["close"],
-        last["rsi"],
-        last["ema20"],
-        last["ema50"],
-        last["ema200"],
-        last["atr"],
-        1.0,
-        market_state
+        symbol=swing_symbol,
+        price=float(last["close"]),
+        rsi=float(last["rsi"]),
+        ema_fast=float(last["ema20"]),
+        ema_mid=float(last["ema50"]),
+        ema_slow=float(last["ema200"]),
+        atr=float(last["atr"]),
+        volume_factor=1.0,
+        market_state=market_state
     )
 
     score = calculate_trend_score(snap)
@@ -212,14 +217,11 @@ with tab_swing:
         open=df["open"],
         high=df["high"],
         low=df["low"],
-        close=df["close"]
+        close=df["close"],
+        name="Price"
     )
     fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], name="EMA 50"))
     fig.add_trace(go.Scatter(x=df.index, y=df["ema200"], name="EMA 200"))
-
-    fig.update_layout(
-        height=520,
-        title=f"{swing_symbol} – Swing Chart (Daily)"
-    )
+    fig.update_layout(height=540, title=f"{swing_symbol} – Swing Chart")
 
     st.plotly_chart(fig, width="stretch")
