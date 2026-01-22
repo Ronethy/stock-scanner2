@@ -1,153 +1,225 @@
+# ================================
+# app.py – Smart Momentum Scanner
+# ================================
+
 import streamlit as st
 import pandas as pd
-import pytz
-from datetime import datetime
-
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from datetime import datetime
+import pytz
 
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
-
-# Logic imports
-from logic.indicators import ema, rsi
-from logic.trend_score import calculate_trend_score, traffic_light
+# ===== PROJECT IMPORTS =====
+from data.sp500_symbols import SP500_SYMBOLS
+from logic.indicators import ema, rsi, atr
+from logic.trend_score import calculate_trend_score, trend_ampel
 from logic.trade_plan import trade_plan
 from logic.premarket_scanner import scan_early_movers
-from data.sp500_symbols import SP500_SYMBOLS
+from logic.snapshot import MarketSnapshot
+from logic.data_loader import load_daily_data
 
-# =====================================================
+# ================================
 # CONFIG
-# =====================================================
-st.set_page_config("Smart Momentum Trading Dashboard", layout="wide")
+# ================================
 
-# Alpaca Client
-client = StockHistoricalDataClient(
-    api_key=st.secrets["ALPACA_API_KEY"],
-    secret_key=st.secrets["ALPACA_SECRET_KEY"]
+st.set_page_config(
+    page_title="Smart Momentum Trading Dashboard",
+    layout="wide"
 )
 
-# Session State für ausgewählte Aktie
-if "symbol" not in st.session_state:
-    st.session_state.symbol = "AAPL"
+# ================================
+# MARKET STATUS
+# ================================
 
-# =====================================================
-# HEADER
-# =====================================================
-st.title("📊 Smart Momentum Trading Dashboard")
+ny_tz = pytz.timezone("US/Eastern")
+ny_time = datetime.now(ny_tz)
 
-ny = pytz.timezone("US/Eastern")
-now = datetime.now(ny)
+market_open = ny_time.replace(hour=9, minute=30, second=0)
+market_close = ny_time.replace(hour=16, minute=0, second=0)
 
-# Marktstatus bestimmen
-if now.hour < 9 or (now.hour == 9 and now.minute < 30):
-    market_state = "PRE-MARKET"
-    color = "🟡"
-elif now.hour < 16:
+if market_open <= ny_time <= market_close:
     market_state = "OPEN"
-    color = "🟢"
+    market_color = "🟢"
 else:
     market_state = "CLOSED"
-    color = "🔴"
+    market_color = "🔴"
 
-st.write(f"Aktuelle Uhrzeit (NYSE): {now.strftime('%Y-%m-%d %H:%M:%S')} - Marktstatus: {color} {market_state}")
-st.divider()
+# ================================
+# HEADER
+# ================================
 
-# =====================================================
+st.title("📊 Smart Momentum Trading Dashboard")
+
+st.markdown(
+    f"""
+**NYSE Zeit:** `{ny_time.strftime('%Y-%m-%d %H:%M:%S')}`  
+**Marktstatus:** {market_color} **{market_state}**
+"""
+)
+
+# ================================
 # TABS
-# =====================================================
-tab_early, tab_day, tab_swing = st.tabs([
-    "🔥 Early Movers",
-    "⚡ Daytrade",
-    "📆 Swingtrade"
-])
+# ================================
 
-# =====================================================
-# TAB 1 - EARLY MOVERS
-# =====================================================
+tab_market, tab_early, tab_sp500, tab_swing = st.tabs(
+    ["📊 Marktübersicht", "🔥 Early Movers", "🧠 S&P 500 Scanner", "📈 Swing Trading"]
+)
+
+# ======================================================
+# 📊 MARKTÜBERSICHT
+# ======================================================
+
+with tab_market:
+    st.subheader("📊 Marktüberblick")
+    st.info(
+        "Dieses Dashboard kombiniert Trend-Momentum, EMA-Struktur, RSI "
+        "und Volatilität zu objektiven Trading-Signalen."
+    )
+
+# ======================================================
+# 🔥 EARLY MOVERS
+# ======================================================
+
 with tab_early:
-    df = scan_early_movers(SP500_SYMBOLS, client)
-    if df.empty:
-        st.info("Keine Early Movers gefunden")
+    st.subheader("🔥 Premarket Early Movers")
+
+    movers = scan_early_movers()
+
+    if not movers:
+        st.warning("Keine auffälligen Premarket-Bewegungen gefunden")
     else:
-        st.dataframe(df, width="stretch")
+        st.dataframe(pd.DataFrame(movers), width="stretch")
 
-        for _, r in df.iterrows():
-            if st.button(r["Symbol"]):
-                st.session_state.symbol = r["Symbol"]
+# ======================================================
+# 🧠 S&P 500 SCANNER
+# ======================================================
 
-# =====================================================
-# CHART-RENDER FUNCTION
-# =====================================================
-def render_chart(symbol, timeframe, title):
-    req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=timeframe, limit=300)
-    bars = client.get_stock_bars(req).df
-    if bars is None or bars.empty:
-        st.warning("Keine Daten verfügbar")
-        return
+with tab_sp500:
+    st.subheader("🧠 S&P 500 Momentum Scanner")
 
-    df = bars.xs(symbol)
+    symbol = st.selectbox("📌 Symbol auswählen", SP500_SYMBOLS)
+
+    df = load_daily_data(symbol)
+
+    if df is None or len(df) < 60:
+        st.error("Nicht genügend Marktdaten verfügbar")
+        st.stop()
+
+    df["ema9"] = ema(df["close"], 9)
     df["ema20"] = ema(df["close"], 20)
     df["ema50"] = ema(df["close"], 50)
     df["rsi"] = rsi(df["close"])
-    df["vol_ma"] = df["volume"].rolling(20).mean()
+    df["atr"] = atr(df)
     df.dropna(inplace=True)
 
-    if len(df) < 30:
-        st.warning("Zu wenig Daten")
-        return
+    if df.empty:
+        st.stop()
 
-    # Letzte Kerze für Score / Ampel / Trade-Plan
     last = df.iloc[-1]
-    score = calculate_trend_score(last)
-    label, color = traffic_light(score)
-    plan = trade_plan(last["close"], df["close"].rolling(14).std().iloc[-1])
 
-    # --------------------------
-    # Plotly Chart mit Subplots
-    # --------------------------
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                        row_heights=[0.6,0.2,0.2], vertical_spacing=0.03)
-
-    # Candles + EMA
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df["open"], high=df["high"],
-        low=df["low"], close=df["close"], name="Candles"
-    ), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema20"], line=dict(color="blue", width=1), name="EMA20"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], line=dict(color="orange", width=1), name="EMA50"), row=1, col=1)
-
-    # Volume
-    fig.add_trace(go.Bar(x=df.index, y=df["volume"], name="Volume"), row=2, col=1)
-
-    # RSI
-    fig.add_trace(go.Scatter(x=df.index, y=df["rsi"], name="RSI", line=dict(color="purple", width=1)), row=3, col=1)
-
-    # Ampel-Annotation
-    fig.add_annotation(
-        x=0.01, y=0.95, xref="paper", yref="paper",
-        text=f"{label} ({score})",
-        bgcolor=color, showarrow=False
+    snap = MarketSnapshot(
+        symbol,
+        last["close"],
+        last["rsi"],
+        last["ema9"],
+        last["ema20"],
+        last["ema50"],
+        last["atr"],
+        1.0,
+        market_state
     )
 
-    fig.update_layout(height=700, title_text=f"{title}: {symbol}", showlegend=True)
+    score = calculate_trend_score(snap)
+    ampel = trend_ampel(score)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📈 Trend-Score", score)
+    c2.metric("🟢 Ampel", ampel)
+    c3.metric("📊 RSI", f"{last['rsi']:.1f}")
+
+    st.subheader("📦 Trade-Plan")
+    st.json(trade_plan(snap))
+
+    fig = go.Figure()
+    fig.add_candlestick(
+        x=df.index,
+        open=df["open"],
+        high=df["high"],
+        low=df["low"],
+        close=df["close"]
+    )
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema20"], name="EMA 20"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], name="EMA 50"))
+    fig.update_layout(height=500, title=f"{symbol} – Daily Chart")
     st.plotly_chart(fig, width="stretch")
 
-    # --------------------------
-    # Trade-Plan Box
-    # --------------------------
-    st.markdown("### 📝 Trade-Plan")
-    st.write(plan)
+# ======================================================
+# 📈 SWING TRADING (JETZT VOLLSTÄNDIG)
+# ======================================================
 
-# =====================================================
-# TAB 2 - DAYTRADE
-# =====================================================
-with tab_day:
-    render_chart(st.session_state.symbol, TimeFrame.Minute, "Daytrade")
-
-# =====================================================
-# TAB 3 - SWINGTRADE
-# =====================================================
 with tab_swing:
-    render_chart(st.session_state.symbol, TimeFrame.Day, "Swingtrade")
+    st.subheader("📈 Swing Trading Analyse (Daily / Multi-Day)")
+
+    swing_symbol = st.selectbox(
+        "📌 Swing-Symbol auswählen",
+        SP500_SYMBOLS,
+        key="swing_symbol"
+    )
+
+    df = load_daily_data(swing_symbol)
+
+    if df is None or len(df) < 120:
+        st.warning("Zu wenig Daten für Swing-Analyse")
+        st.stop()
+
+    df["ema20"] = ema(df["close"], 20)
+    df["ema50"] = ema(df["close"], 50)
+    df["ema200"] = ema(df["close"], 200)
+    df["rsi"] = rsi(df["close"])
+    df["atr"] = atr(df)
+    df.dropna(inplace=True)
+
+    if df.empty:
+        st.stop()
+
+    last = df.iloc[-1]
+
+    snap = MarketSnapshot(
+        swing_symbol,
+        last["close"],
+        last["rsi"],
+        last["ema20"],
+        last["ema50"],
+        last["ema200"],
+        last["atr"],
+        1.0,
+        market_state
+    )
+
+    score = calculate_trend_score(snap)
+    ampel = trend_ampel(score)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("📈 Trend-Score", score)
+    c2.metric("🟢 Ampel", ampel)
+    c3.metric("📊 RSI", f"{last['rsi']:.1f}")
+
+    st.subheader("📦 Swing Trade-Plan")
+    st.json(trade_plan(snap))
+
+    fig = go.Figure()
+    fig.add_candlestick(
+        x=df.index,
+        open=df["open"],
+        high=df["high"],
+        low=df["low"],
+        close=df["close"]
+    )
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema50"], name="EMA 50"))
+    fig.add_trace(go.Scatter(x=df.index, y=df["ema200"], name="EMA 200"))
+
+    fig.update_layout(
+        height=520,
+        title=f"{swing_symbol} – Swing Chart (Daily)"
+    )
+
+    st.plotly_chart(fig, width="stretch")
