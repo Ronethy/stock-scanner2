@@ -5,9 +5,9 @@ class MarketSnapshot:
     symbol: str
     price: float
     rsi: float
-    ema9: float
-    ema20: float
-    ema50: float
+    ema_fast: float
+    ema_mid: float
+    ema_slow: float
     atr: float
-    volume_ratio: float
+    volume_factor: float
     market_state: str
