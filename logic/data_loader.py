@@ -5,8 +5,8 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 def get_client():
-    api_key = os.getenv("APCA_API_KEY_ID")
-    secret_key = os.getenv("APCA_API_SECRET_KEY")
+    api_key = os.getenv("ALPACA_API_KEY_ID")
+    secret_key = os.getenv("ALPACA_API_SECRET_KEY")
 
     if not api_key or not secret_key:
         raise ValueError("Alpaca API Keys fehlen")
