@@ -1,19 +1,7 @@
-def trade_plan(snapshot, score):
-    if score < 65:
-        return None
-
-    entry = snapshot.price
-    stop = entry - 1.2 * snapshot.atr
-    target = entry + 2 * (entry - stop)
-
-    rr = (target - entry) / (entry - stop)
-
-    if rr < 1.8:
-        return None
-
+def trade_plan(s):
     return {
-        "Entry": round(entry, 2),
-        "Stop": round(stop, 2),
-        "Target": round(target, 2),
-        "RR": round(rr, 2)
+        "Entry": round(s.price, 2),
+        "Stop": round(s.price - s.atr * 1.5, 2),
+        "Target": round(s.price + s.atr * 3, 2),
+        "Risk/Reward": "1 : 2"
     }
