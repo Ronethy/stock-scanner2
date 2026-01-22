@@ -1,32 +1,18 @@
 def calculate_trend_score(s):
     score = 0
 
-    # EMA Struktur
-    if s.ema9 > s.ema20 > s.ema50:
-        score += 30
-    elif s.ema9 > s.ema20:
-        score += 15
-
-    # RSI
-    if 50 <= s.rsi <= 65:
+    if s.ema_fast > s.ema_mid > s.ema_slow:
+        score += 40
+    if s.rsi > 55:
         score += 20
-    elif 45 <= s.rsi < 50 or 65 < s.rsi <= 70:
-        score += 10
-
-    # Volumen
-    if s.volume_ratio > 1.5:
-        score += 20
-    elif s.volume_ratio > 1.1:
-        score += 10
-
-    # ATR
-    if s.atr / s.price > 0.015:
-        score += 15
-
-    # Marktphase
     if s.market_state == "OPEN":
-        score += 15
-    elif s.market_state == "PRE":
-        score += 8
+        score += 10
 
-    return min(score, 100)
+    return score
+
+def trend_ampel(score):
+    if score >= 60:
+        return "BUY 🟢"
+    elif score >= 40:
+        return "NEUTRAL 🟡"
+    return "AVOID 🔴"
